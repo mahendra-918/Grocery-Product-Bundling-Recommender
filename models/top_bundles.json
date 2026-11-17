@@ -1,0 +1,105 @@
+[
+  {
+    "bundle_id": "bundle_produce_stew",
+    "name": "Fresh Stew & Veggie Pack",
+    "category": "Fresh Produce & Cooking",
+    "items": [
+      "other vegetables",
+      "root vegetables",
+      "whole milk"
+    ],
+    "description": "Essential fresh vegetables paired with whole milk for rich home cooking, stews, and soups.",
+    "support_pct": 2.32,
+    "orders_count": 228,
+    "synergy_lift": 2.84,
+    "original_price": 8.5,
+    "bundle_price": 7.65,
+    "discount_pct": 10
+  },
+  {
+    "bundle_id": "bundle_morning_breakfast",
+    "name": "Sunrise Fruit & Yogurt Breakfast",
+    "category": "Breakfast & Dairy",
+    "items": [
+      "tropical fruit",
+      "whole milk",
+      "yogurt"
+    ],
+    "description": "Wholesome morning staple combining tropical fruits, fresh yogurt, and creamy milk.",
+    "support_pct": 1.51,
+    "orders_count": 149,
+    "synergy_lift": 2.58,
+    "original_price": 9.2,
+    "bundle_price": 8.1,
+    "discount_pct": 12
+  },
+  {
+    "bundle_id": "bundle_bakery_staples",
+    "name": "Morning Bakery & Dairy Essentials",
+    "category": "Bakery & Breakfast",
+    "items": [
+      "rolls/buns",
+      "whole milk",
+      "yogurt"
+    ],
+    "description": "Freshly baked rolls and buns accompanied by nutritious dairy staples for quick family breakfasts.",
+    "support_pct": 1.56,
+    "orders_count": 153,
+    "synergy_lift": 1.97,
+    "original_price": 7.9,
+    "bundle_price": 7.11,
+    "discount_pct": 10
+  },
+  {
+    "bundle_id": "bundle_salad_produce",
+    "name": "Fresh Harvest Fruit & Salad Combo",
+    "category": "Fresh Produce",
+    "items": [
+      "other vegetables",
+      "tropical fruit",
+      "whole milk"
+    ],
+    "description": "Vibrant blend of farm-fresh vegetables and tropical fruits with wholesome milk.",
+    "support_pct": 1.71,
+    "orders_count": 168,
+    "synergy_lift": 2.18,
+    "original_price": 9.5,
+    "bundle_price": 8.55,
+    "discount_pct": 10
+  },
+  {
+    "bundle_id": "bundle_mega_pantry",
+    "name": "Mega Household Pantry Pack",
+    "category": "Family Essentials",
+    "items": [
+      "other vegetables",
+      "root vegetables",
+      "whole milk",
+      "yogurt"
+    ],
+    "description": "Complete 4-item grocery power-bundle with the highest observed cross-category synergy (4.05x Lift).",
+    "support_pct": 0.78,
+    "orders_count": 77,
+    "synergy_lift": 4.05,
+    "original_price": 11.4,
+    "bundle_price": 9.69,
+    "discount_pct": 15
+  },
+  {
+    "bundle_id": "bundle_afternoon_snack",
+    "name": "Quick Lunch & Afternoon Snack Pack",
+    "category": "Snacks & Quick Meals",
+    "items": [
+      "other vegetables",
+      "rolls/buns",
+      "whole milk"
+    ],
+    "description": "Popular daily combination of bakery rolls, fresh veggies, and milk for sandwiches and quick bites.",
+    "support_pct": 1.79,
+    "orders_count": 176,
+    "synergy_lift": 1.64,
+    "original_price": 8.2,
+    "bundle_price": 7.54,
+    "discount_pct": 8
+  }
+]

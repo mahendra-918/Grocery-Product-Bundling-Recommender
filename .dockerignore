@@ -1,0 +1,30 @@
+# Git & OS metadata
+.git
+.gitignore
+.DS_Store
+.vscode
+.idea
+
+# Python bytecode & environments
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+miniconda3/
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Notebook checkpoints
+.ipynb_checkpoints
+notebooks/.ipynb_checkpoints
+
+# Logs
+*.log
+

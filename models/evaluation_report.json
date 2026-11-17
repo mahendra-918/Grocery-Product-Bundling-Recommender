@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-11-17T06:21:00.680996+00:00",
+  "overall_status": "PASSED",
+  "all_passed": true,
+  "catalog_coverage": {
+    "test_name": "Catalog SKU Coverage",
+    "status": "PASS",
+    "passed": true,
+    "total_catalog_skus": 169,
+    "direct_rule_skus_count": 72,
+    "direct_rule_coverage_pct": 42.6,
+    "antecedent_skus_count": 72,
+    "antecedent_coverage_pct": 42.6,
+    "consequent_skus_count": 17,
+    "consequent_coverage_pct": 10.06,
+    "effective_recommendation_coverage_pct": 100.0,
+    "fallback_staples_count": 5
+  },
+  "mathematical_invariants": {
+    "test_name": "Mathematical Invariants Validation",
+    "status": "PASS",
+    "passed": true,
+    "total_rules_checked": 861,
+    "total_critical_violations": 0,
+    "single_item_consequents": 840,
+    "multi_item_consequents": 21,
+    "checks": {
+      "support_in_0_1": true,
+      "confidence_in_0_1": true,
+      "lift_gte_min_lift": true,
+      "confidence_gte_support": true,
+      "antecedent_consequent_disjoint": true
+    }
+  },
+  "latency_benchmark": {
+    "test_name": "Inference Latency & SLA Benchmark",
+    "status": "PASS",
+    "passed": true,
+    "queries_executed": 1000,
+    "target_p95_ms": 25.0,
+    "mean_latency_ms": 0.29,
+    "median_p50_ms": 0.256,
+    "p90_ms": 0.381,
+    "p95_ms": 0.536,
+    "p99_ms": 1.032,
+    "min_ms": 0.126,
+    "max_ms": 4.541,
+    "throughput_queries_per_sec": 3444.7,
+    "sla_met": true
+  }
+}
