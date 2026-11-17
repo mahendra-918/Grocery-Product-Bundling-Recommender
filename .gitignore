@@ -50,9 +50,9 @@ htmlcov/
 .vscode/
 .idea/
 
-# Large model artifacts (optional to track or ignore depending on size)
-models/*.pkl
+# Large model artifacts (track association_rules.pkl, ignore huge parquet/raw dumps)
 models/*.parquet
+!models/association_rules.pkl
 
 
 GROCERY_RECOMMENDER_SPEC_COMPLETE.docx
