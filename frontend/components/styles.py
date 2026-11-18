@@ -198,54 +198,63 @@ hr { border-color: #30363d !important; }
     text-align: center;
     margin: 0.3rem 0 0.4rem;
 }
-.together-badge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.3rem;
-    background: #1f2d1f;
-    border: 1px solid #2ea043;
-    color: #3fb950 !important;
-    font-size: 0.75rem;
-    font-weight: 700;
-    padding: 0.3rem 0.8rem;
-    border-radius: 9999px;
-    margin: 0 auto 0.6rem;
-    width: fit-content;
-}
-.top-pick-ribbon {
+.developer-lift {
     display: inline-block;
-    background: #da3633;
-    color: #fff !important;
-    font-size: 0.68rem;
-    font-weight: 800;
-    padding: 0.22rem 0.65rem;
-    border-radius: 9999px;
-    margin-bottom: 0.4rem;
-}
-.shoppers-str {
-    font-size: 0.8rem;
-    color: #8b949e !important;
-    text-align: center;
-    margin-top: 0.3rem;
+    border: 1px solid #385b44;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    background: #1a2b24;
+    color: #a6e5b5 !important;
+    font-size: 0.76rem;
+    font-weight: 700;
 }
 
-/* ═══════════════════════════════════════════
-   BASKET CHIPS
-══════════════════════════════════════════ */
-.basket-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: #1f2d1f;
-    border: 1.5px solid #2ea043;
-    color: #3fb950 !important;
-    padding: 0.35rem 0.9rem;
-    border-radius: 9999px;
-    font-size: 0.83rem;
-    font-weight: 700;
-    text-transform: capitalize;
-    margin: 0.2rem;
+/* Grocery catalog */
+.grocery-illustration {
+    display: grid;
+    place-items: center;
+    min-height: 5rem;
+    margin-bottom: 0.65rem;
+    border-radius: 10px;
+    background: radial-gradient(ellipse at 50% 60%, #284735, #1a2b24);
+    font-size: 2.75rem;
+}
+.grocery-name {
+    min-height: 2.5em;
+    color: #e6edf3;
+    font-size: 0.95rem;
+    font-weight: 800;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.grocery-department {
+    color: #a6b3bf;
+    font-size: 0.76rem;
+    margin: 0.25rem 0;
+}
+.grocery-price {
+    color: #68d785;
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+.st-key-grocery_catalog button:disabled {
+    color: #a6b3bf !important;
+}
+
+@media (max-width: 640px) {
+    .st-key-grocery_catalog [data-testid="stHorizontalBlock"] {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+    }
+    .st-key-grocery_catalog [data-testid="stColumn"] {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .grocery-illustration {
+        min-height: 3.75rem;
+        font-size: 2rem;
+    }
 }
 
 /* ═══════════════════════════════════════════
@@ -323,20 +332,6 @@ hr { border-color: #30363d !important; }
 /* ═══════════════════════════════════════════
    HOW IT WORKS CARDS
 ══════════════════════════════════════════ */
-.how-card {
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 16px;
-    padding: 1.5rem 1.2rem;
-    text-align: center;
-}
-.how-emoji { font-size: 2.5rem; margin-bottom: 0.5rem; }
-.how-title {
-    font-size: 1.05rem; font-weight: 800;
-    color: #e6edf3 !important; margin-bottom: 0.3rem;
-}
-.how-desc { font-size: 0.84rem; color: #8b949e !important; line-height: 1.5; }
-
 /* ═══════════════════════════════════════════
    EMPTY STATES
 ══════════════════════════════════════════ */

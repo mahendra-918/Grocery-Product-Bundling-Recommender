@@ -90,6 +90,15 @@ class GroceryRecommender:
         """Returns the pre-mined theme bundles."""
         return list(self.bundles)
 
+    def get_discovered_bundles(self) -> List[Dict[str, Any]]:
+        """Read the mined combinations from the same artifact directory as the curated kits."""
+        path = self.bundles_path.with_name("discovered_bundles.json")
+        try:
+            with path.open(encoding="utf-8") as file:
+                return json.load(file)
+        except FileNotFoundError:
+            return []
+
     def get_bundle_by_id(self, bundle_id: str) -> Optional[Dict[str, Any]]:
         """Finds and returns a single bundle by ID, or None if not found."""
         for bundle in self.bundles:
@@ -97,131 +106,75 @@ class GroceryRecommender:
                 return bundle
         return None
 
-    def recommend(self, cart_items: List[str], top_k: int = 5) -> Dict[str, Any]:
-        """
-        Generates personalized, explainable product recommendations for a customer's cart.
-
-        Args:
-            cart_items: List of product names in the customer's cart.
-            top_k: Maximum number of recommendations to return (default: 5).
-
-        Returns:
-            Dict containing recommendations, strategy, status message, and cart metadata.
-        """
-        # 1. Sanitize cart items
-        normalized_cart = sorted(list(set(
-            str(item).strip().lower() for item in cart_items if str(item).strip()
-        )))
-        cart_set = set(normalized_cart)
-
-        # Detect unknown items if product catalog is populated
+    def recommend(
+        self,
+        cart_items: List[str],
+        top_k: int = 5,
+        min_confidence: Optional[float] = None,
+        min_lift: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Rank qualifying recommendations for a cart. Minimum confidence is a ratio."""
+        cart_set = {str(item).strip().lower() for item in cart_items if str(item).strip()}
+        normalized_cart = sorted(cart_set)
         unknown_items = [item for item in normalized_cart if self.products_set and item not in self.products_set]
+        confidence_floor = min_confidence if min_confidence is not None else 0.0
+        lift_floor = min_lift if min_lift is not None else 0.0
 
-        # 2. Handle empty cart or missing rules -> Fallback
-        if not cart_set or self.rules.empty:
-            fallback_items = [item for item in self.fallback_staples if item not in cart_set][:top_k]
-            return {
-                "cart": normalized_cart,
-                "recommendations": [
-                    {
-                        "item": item,
-                        "triggered_by": "store_bestseller",
-                        "lift": 1.00,
-                        "confidence": 0.0,
-                        "support": 0.0,
-                        "strategy": "fallback_staples"
-                    }
-                    for item in fallback_items
-                ],
-                "strategy": "fallback_staples",
-                "message": "Cart is empty or no rules available; displaying top store staples.",
-                "unknown_items": unknown_items
-            }
-
-        # 3. Match association rules: antecedent must be a subset of cart
-        matching_rules = self.rules[
-            self.rules["antecedents"].apply(lambda ant: ant.issubset(cart_set))
-        ]
-
-        if matching_rules.empty:
-            # Cold start / no matching rules
-            fallback_items = [item for item in self.fallback_staples if item not in cart_set][:top_k]
-            return {
-                "cart": normalized_cart,
-                "recommendations": [
-                    {
-                        "item": item,
-                        "triggered_by": "store_bestseller",
-                        "lift": 1.00,
-                        "confidence": 0.0,
-                        "support": 0.0,
-                        "strategy": "fallback_staples"
-                    }
-                    for item in fallback_items
-                ],
-                "strategy": "fallback_staples",
-                "message": "No strong association rules found for this combination; falling back to store staples.",
-                "unknown_items": unknown_items
-            }
-
-        # 4. Extract candidate recommendations and exclude items already in cart
         candidate_map: Dict[str, Dict[str, Any]] = {}
+        if cart_set and not self.rules.empty:
+            matching_rules = self.rules[
+                self.rules["antecedents"].apply(lambda ant: ant.issubset(cart_set))
+            ]
+            for _, rule in matching_rules.iterrows():
+                lift = float(rule["lift"])
+                confidence = float(rule["confidence"])
+                if confidence < confidence_floor or lift < lift_floor:
+                    continue
 
-        for _, rule in matching_rules.iterrows():
-            consequents = rule["consequents"]
-            recommended_items = consequents - cart_set
-            if not recommended_items:
-                continue
+                for item in rule["consequents"] - cart_set:
+                    current = candidate_map.get(item)
+                    if current is None or (lift, confidence * 100) > (current["lift"], current["confidence"]):
+                        candidate_map[item] = {
+                            "item": item,
+                            "triggered_by": str(rule["antecedents_str"]),
+                            "lift": lift,
+                            "confidence": confidence * 100,
+                            "support": float(rule["support"]) * 100,
+                            "strategy": "association_rule",
+                        }
 
-            lift = float(rule["lift"])
-            confidence = float(rule["confidence"]) * 100.0
-            support = float(rule["support"]) * 100.0
-            trigger = str(rule["antecedents_str"])
-
-            for item in recommended_items:
-                # Deduplicate: if an item is suggested by multiple rules, keep the highest Lift
-                if item not in candidate_map or lift > candidate_map[item]["lift"]:
-                    candidate_map[item] = {
-                        "item": item,
-                        "triggered_by": trigger,
-                        "lift": round(lift, 2),
-                        "confidence": round(confidence, 1),
-                        "support": round(support, 2),
-                        "strategy": "association_rule"
-                    }
-
-        # If all consequents were already in cart, fallback
-        if not candidate_map:
-            fallback_items = [item for item in self.fallback_staples if item not in cart_set][:top_k]
-            return {
-                "cart": normalized_cart,
-                "recommendations": [
-                    {
-                        "item": item,
-                        "triggered_by": "store_bestseller",
-                        "lift": 1.00,
-                        "confidence": 0.0,
-                        "support": 0.0,
-                        "strategy": "fallback_staples"
-                    }
-                    for item in fallback_items
-                ],
-                "strategy": "fallback_staples",
-                "message": "All rule-associated items are already in your cart; showing store staples.",
-                "unknown_items": unknown_items
-            }
-
-        # 5. Sort by Lift descending, tiebreak by confidence descending
-        sorted_recommendations = sorted(
-            candidate_map.values(),
-            key=lambda x: (x["lift"], x["confidence"]),
-            reverse=True
-        )[:top_k]
+        if candidate_map:
+            recommendations = sorted(
+                candidate_map.values(),
+                key=lambda rec: (-rec["lift"], -rec["confidence"], rec["item"]),
+            )[:top_k]
+            strategy = "association_rule"
+            message = f"Found {len(recommendations)} personalized bundle recommendations."
+        else:
+            fallback_items = []
+            if confidence_floor <= 0 and lift_floor <= 1:
+                fallback_items = [item for item in self.fallback_staples if item not in cart_set][:top_k]
+            recommendations = [
+                {
+                    "item": item,
+                    "triggered_by": "store_bestseller",
+                    "lift": 1.0,
+                    "confidence": 0.0,
+                    "support": 0.0,
+                    "strategy": "fallback_staples",
+                }
+                for item in fallback_items
+            ]
+            strategy = "fallback_staples"
+            message = (
+                "No matching rules; showing store staples." if recommendations
+                else "No recommendations match this cart and thresholds."
+            )
 
         return {
             "cart": normalized_cart,
-            "recommendations": sorted_recommendations,
-            "strategy": "association_rule",
-            "message": f"Found {len(sorted_recommendations)} personalized bundle recommendations.",
-            "unknown_items": unknown_items
+            "recommendations": recommendations,
+            "strategy": strategy,
+            "message": message,
+            "unknown_items": unknown_items,
         }

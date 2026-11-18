@@ -6,6 +6,7 @@ and serializes production models for the FastAPI backend and recommender engine.
 
 import argparse
 import json
+from math import prod
 import pickle
 import sys
 import time
@@ -126,6 +127,28 @@ def resolve_data_path(custom_path: Optional[str] = None) -> Path:
     raise FileNotFoundError("Could not locate grocery transaction dataset in data/.")
 
 
+def discover_bundles(frequent_itemsets: pd.DataFrame, transaction_count: int) -> List[Dict[str, Any]]:
+    """Describe frequent pairs and triples by support and lift under mutual independence."""
+    singleton_support = {
+        next(iter(row.itemsets)): float(row.support)
+        for row in frequent_itemsets.itertuples(index=False)
+        if len(row.itemsets) == 1
+    }
+    bundles = []
+    for row in frequent_itemsets.itertuples(index=False):
+        if len(row.itemsets) not in (2, 3):
+            continue
+        items = sorted(row.itemsets)
+        support = float(row.support)
+        bundles.append({
+            "items": items,
+            "support": support,
+            "joint_lift": support / prod(singleton_support[item] for item in items),
+            "orders_count": round(support * transaction_count),
+        })
+    return sorted(bundles, key=lambda bundle: (-bundle["support"], -bundle["joint_lift"], bundle["items"]))
+
+
 def train_and_export(
     data_path: Optional[str] = None,
     min_support: float = 0.005,
@@ -203,7 +226,7 @@ def train_and_export(
     # Sort by Lift descending (primary ranking criterion)
     pruned_rules = pruned_rules.sort_values(by="lift", ascending=False).reset_index(drop=True)
 
-    retention_pct = (len(pruned_rules) / len(candidate_rules)) * 100
+    retention_pct = len(pruned_rules) / len(candidate_rules) * 100 if len(candidate_rules) else 0.0
     print(f"  ✓ Production rules retained: {len(pruned_rules):,} / {len(candidate_rules):,} ({retention_pct:.1f}%)")
     print(f"  ✓ Mean Confidence: {pruned_rules['confidence'].mean()*100:.1f}%")
     print(f"  ✓ Mean Lift:       {pruned_rules['lift'].mean():.2f}x")
@@ -230,6 +253,12 @@ def train_and_export(
         json.dump(CURATED_BUNDLES, f, indent=2)
     print(f"  ✓ Saved: {bundles_file} ({len(CURATED_BUNDLES)} theme packs)")
 
+    discovered = discover_bundles(frequent_itemsets, len(transactions))
+    discovered_file = output_path / "discovered_bundles.json"
+    with discovered_file.open("w", encoding="utf-8") as file:
+        file.write("[\n" + ",\n".join("  " + json.dumps(bundle) for bundle in discovered) + "\n]\n")
+    print(f"  ✓ Saved: {discovered_file} ({len(discovered)} mined combinations)")
+
     total_time = time.time() - start_time
     print("\n" + "=" * 70)
     print(f"✨ TRAINING PIPELINE COMPLETE IN {total_time:.2f}s!")
@@ -248,7 +277,8 @@ def train_and_export(
         "artifacts": {
             "rules": str(rules_file),
             "products": str(products_file),
-            "bundles": str(bundles_file)
+            "bundles": str(bundles_file),
+            "discovered_bundles": str(discovered_file)
         }
     }
 

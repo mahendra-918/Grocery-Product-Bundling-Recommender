@@ -29,6 +29,13 @@ from backend.services.recommender_service import recommender_service
 from backend.db import order_db
 
 START_TIME = time.time()
+MODEL_ERROR = {503: {"model": ErrorResponse, "description": "Association rules are unavailable"}}
+RECOMMEND_ERRORS = {
+    400: {"model": ErrorResponse, "description": "The cart has no products"},
+    404: {"model": ErrorResponse, "description": "A product is missing from the catalog"},
+    422: {"model": ErrorResponse, "description": "Request validation failed"},
+    **MODEL_ERROR,
+}
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -61,12 +68,17 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         500: "INTERNAL_SERVER_ERROR",
         503: "SERVICE_UNAVAILABLE",
     }
+    detail = exc.detail
+    code = code_map.get(exc.status_code, "HTTP_ERROR")
+    if isinstance(detail, dict):
+        code = detail.get("code", code)
+        detail = detail.get("message", detail)
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(
             error=ErrorDetail(
-                code=code_map.get(exc.status_code, "HTTP_ERROR"),
-                message=str(exc.detail),
+                code=code,
+                message=str(detail),
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
         ).model_dump(),
@@ -108,10 +120,22 @@ def root():
     }
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-@app.get(f"{settings.API_V1_STR}/health", response_model=HealthResponse, tags=["Health"])
+def require_model_rules() -> None:
+    if recommender_service.recommender.rules.empty:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "RULES_NOT_LOADED",
+                "message": "Association rules are unavailable. Check the model artifact and restart the API.",
+            },
+        )
+
+
+@app.get("/health", response_model=HealthResponse, responses=MODEL_ERROR, tags=["Health"])
+@app.get(f"{settings.API_V1_STR}/health", response_model=HealthResponse, responses=MODEL_ERROR, tags=["Health"])
 def get_health() -> HealthResponse:
     """Verifies service uptime, loaded association rules count, and SKU catalog size."""
+    require_model_rules()
     uptime = time.time() - START_TIME
     return recommender_service.get_health(uptime_seconds=uptime)
 
@@ -123,13 +147,29 @@ def get_products() -> ProductsResponse:
     return recommender_service.get_products()
 
 
-@app.post("/recommend", response_model=RecommendResponse, tags=["Recommendations"])
-@app.post(f"{settings.API_V1_STR}/recommend", response_model=RecommendResponse, tags=["Recommendations"])
+@app.post("/recommend", response_model=RecommendResponse, responses=RECOMMEND_ERRORS, tags=["Recommendations"])
+@app.post(f"{settings.API_V1_STR}/recommend", response_model=RecommendResponse, responses=RECOMMEND_ERRORS, tags=["Recommendations"])
 def get_recommendations(request: RecommendRequest) -> RecommendResponse:
     """
     Sub-10ms basket recommendation query based on FP-Growth association rules.
     Accepts customer basket items and returns high-synergy products with explainable Lift & Confidence.
     """
+    products = sorted({item.strip().lower() for item in request.items if item.strip()})
+    if not products:
+        raise HTTPException(status_code=400, detail="At least one product must be specified.")
+
+    require_model_rules()
+    unknown_products = set(products) - recommender_service.recommender.products_set
+    if unknown_products:
+        names = ", ".join(sorted(unknown_products))
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PRODUCT_NOT_FOUND",
+                "message": f"Products not found in the grocery catalog: {names}. Use /products to find valid names.",
+            },
+        )
+
     return recommender_service.get_recommendations(request)
 
 

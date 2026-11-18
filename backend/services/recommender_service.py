@@ -66,26 +66,19 @@ class RecommenderService:
         """
         start_time = time.perf_counter()
 
-        # Call core recommender engine
-        raw_res = self.recommender.recommend(cart_items=req.items, top_k=req.top_k)
-        raw_recs = raw_res.get("recommendations", [])
-
-        # Apply user threshold filters if provided
-        filtered_recs: List[RecommendationItem] = []
-        for r in raw_recs:
+        raw_res = self.recommender.recommend(
+            cart_items=req.items,
+            top_k=req.top_k,
+            min_confidence=req.min_confidence,
+            min_lift=req.min_lift,
+        )
+        recommendations: List[RecommendationItem] = []
+        for r in raw_res["recommendations"]:
             lift = float(r.get("lift", 1.0))
-            # recommender stores confidence as percentage (0-100), convert to ratio (0-1) for API
-            conf_pct = float(r.get("confidence", 0.0))
-            conf_ratio = conf_pct / 100.0 if conf_pct > 1.0 else conf_pct
-            supp_pct = float(r.get("support", 0.0))
-            supp_ratio = supp_pct / 100.0 if supp_pct > 1.0 else supp_pct
+            conf_ratio = float(r.get("confidence", 0.0)) / 100
+            supp_ratio = float(r.get("support", 0.0)) / 100
 
-            if req.min_lift is not None and lift < req.min_lift:
-                continue
-            if req.min_confidence is not None and conf_ratio < req.min_confidence:
-                continue
-
-            filtered_recs.append(
+            recommendations.append(
                 RecommendationItem(
                     product=r.get("item", ""),
                     support=round(supp_ratio, 4),
@@ -101,8 +94,8 @@ class RecommenderService:
 
         return RecommendResponse(
             queryItems=raw_res.get("cart", []),
-            totalReturned=len(filtered_recs),
-            recommendations=filtered_recs,
+            totalReturned=len(recommendations),
+            recommendations=recommendations,
             strategy=raw_res.get("strategy", "association_rule"),
             message=raw_res.get("message", "Success"),
             unknownItems=raw_res.get("unknown_items", []),

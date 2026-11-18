@@ -92,3 +92,17 @@ streamlit run frontend/app.py
 ```bash
 pytest backend/tests/
 ```
+
+## Recommendation Quality on Unseen Baskets
+
+```bash
+python ml/evaluate_holdout.py
+```
+
+The script trains FP-Growth on 80% of the baskets and hides one random product
+from each held-out basket with at least two products. Both methods receive the
+same carts and can return up to five suggestions. The bestseller baseline and
+the model's fallback use purchase frequencies from the training baskets.
+Hit Rate@5 is the share of evaluated baskets where the hidden product appears
+among the suggestions. The report is saved to `models/holdout_evaluation.json`.
+The evaluation trains temporary artifacts, leaving the storefront model intact.

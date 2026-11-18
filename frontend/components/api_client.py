@@ -5,6 +5,7 @@ to direct in-memory GroceryRecommender if the backend server is not running.
 """
 
 import os
+import time
 from typing import Any, Dict, List, Optional
 import requests
 from ml.recommender import GroceryRecommender
@@ -19,16 +20,15 @@ class GroceryEngineClient:
     def __init__(self, base_url: str = DEFAULT_API_URL):
         self.base_url = base_url.rstrip("/")
         self._local_recommender: Optional[GroceryRecommender] = None
-        self._is_backend_online: Optional[bool] = None
 
     def check_backend_connection(self) -> bool:
-        """Checks if the FastAPI backend service is reachable."""
+        """Check whether the API is reachable, even if recommendation rules are unavailable."""
         try:
             res = requests.get(f"{self.base_url}/health", timeout=1.0)
-            self._is_backend_online = (res.status_code == 200)
-            return self._is_backend_online
-        except Exception:
-            self._is_backend_online = False
+            return res.status_code == 200 or (
+                res.status_code == 503 and res.json().get("error", {}).get("code") == "RULES_NOT_LOADED"
+            )
+        except (requests.RequestException, ValueError):
             return False
 
     @property
@@ -82,19 +82,21 @@ class GroceryEngineClient:
                 pass
 
         # Local fallback execution
-        raw = self.local_recommender.recommend(cart_items, top_k=top_k)
+        start = time.perf_counter()
+        raw = self.local_recommender.recommend(
+            cart_items, top_k=top_k, min_confidence=min_confidence, min_lift=min_lift,
+        )
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
         recs = []
         for r in raw.get("recommendations", []):
             lift = float(r.get("lift", 1.0))
             conf = float(r.get("confidence", 0.0)) / 100.0
             supp = float(r.get("support", 0.0)) / 100.0
 
-            if min_lift and lift < min_lift:
-                continue
-            if min_confidence and conf < min_confidence:
-                continue
-
-            affinity = "VERY HIGH" if lift >= 2.0 else ("HIGH" if lift >= 1.5 else "MODERATE")
+            affinity = (
+                "VERY HIGH" if lift >= 2.0 else "HIGH" if lift >= 1.5
+                else "MODERATE" if lift >= 1.15 else "LOW"
+            )
             recs.append({
                 "product": r.get("item", ""),
                 "support": round(supp, 4),
@@ -113,7 +115,7 @@ class GroceryEngineClient:
             "strategy": raw.get("strategy", "association_rule"),
             "message": raw.get("message", ""),
             "unknown_items": raw.get("unknown_items", []),
-            "latency_ms": 2.5,
+            "latency_ms": latency_ms,
         }
 
     def get_bundles(self) -> List[Dict[str, Any]]:

@@ -3,7 +3,7 @@ Pydantic schemas and data transfer objects for the Grocery Recommender REST API.
 Compatible with Pydantic v2.
 """
 
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -35,7 +35,7 @@ class RecommendationItem(BaseModel):
 
 
 class RecommendRequest(BaseModel):
-    items: List[str] = Field(
+    items: List[Annotated[str, Field(max_length=200)]] = Field(
         default_factory=list,
         examples=[["yogurt", "tropical fruit"]],
         description="List of grocery item names currently in the customer's cart"

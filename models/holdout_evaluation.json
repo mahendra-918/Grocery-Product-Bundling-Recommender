@@ -1,0 +1,19 @@
+{
+  "dataset": "groceries - groceries.csv",
+  "seed": 42,
+  "top_k": 5,
+  "training_baskets": 7868,
+  "held_out_baskets": 1967,
+  "evaluated_baskets": 1535,
+  "excluded_single_item_baskets": 432,
+  "freshcart": {
+    "hits": 396,
+    "hit_rate_at_5": 0.2579804560260586,
+    "fallback_baskets": 71,
+    "fallback_rate": 0.04625407166123779
+  },
+  "bestsellers": {
+    "hits": 424,
+    "hit_rate_at_5": 0.2762214983713355
+  }
+}
