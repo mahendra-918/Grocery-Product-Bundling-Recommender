@@ -28,6 +28,19 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                salt BLOB NOT NULL,
+                password_hash BLOB NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS orders (
                 order_id TEXT PRIMARY KEY,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -53,6 +66,12 @@ def init_db() -> None:
             """
         )
 
+        conn.execute("BEGIN IMMEDIATE")
+        columns = {column["name"] for column in conn.execute("PRAGMA table_info(orders)")}
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN user_id INTEGER REFERENCES users(id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_owner ON orders(user_id, created_at DESC)")
+
 
 def create_order(
     items: List[Dict[str, Any]],
@@ -60,6 +79,8 @@ def create_order(
     discount: float = 0.0,
     delivery_fee: float = 0.0,
     status: str = "Completed",
+    *,
+    user_id: int,
 ) -> Dict[str, Any]:
     """
     Creates a new customer order and associated items in SQLite.
@@ -77,10 +98,10 @@ def create_order(
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO orders (order_id, created_at, subtotal, discount, delivery_fee, total_amount, items_count, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (order_id, created_at, subtotal, discount, delivery_fee, total_amount, items_count, status, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (order_id, now_iso, subtotal, discount, delivery_fee, total_amount, len(items), status),
+            (order_id, now_iso, subtotal, discount, delivery_fee, total_amount, sum(item.get("quantity", 1) for item in items), status, user_id),
         )
 
         for item in items:
@@ -98,15 +119,15 @@ def create_order(
             )
         conn.commit()
 
-    return get_order_by_id(order_id)
+    return get_order_by_id(order_id, user_id=user_id)
 
 
-def get_orders(limit: int = 50) -> List[Dict[str, Any]]:
+def get_orders(limit: int = 50, *, user_id: int) -> List[Dict[str, Any]]:
     """Fetches all orders ordered by newest first with their items."""
     init_db()
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT ?", (limit,))
+        cursor.execute("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (user_id, limit))
         order_rows = cursor.fetchall()
 
         orders = []
@@ -122,12 +143,12 @@ def get_orders(limit: int = 50) -> List[Dict[str, Any]]:
         return orders
 
 
-def get_order_by_id(order_id: str) -> Optional[Dict[str, Any]]:
+def get_order_by_id(order_id: str, *, user_id: int) -> Optional[Dict[str, Any]]:
     """Fetches a single order by order_id."""
     init_db()
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+        cursor.execute("SELECT * FROM orders WHERE order_id = ? AND user_id = ?", (order_id, user_id))
         row = cursor.fetchone()
         if not row:
             return None
@@ -141,7 +162,7 @@ def get_order_by_id(order_id: str) -> Optional[Dict[str, Any]]:
         return order_dict
 
 
-def get_order_stats() -> Dict[str, Any]:
+def get_order_stats(*, user_id: int) -> Dict[str, Any]:
     """Aggregates lifetime order KPIs."""
     init_db()
     with get_connection() as conn:
@@ -153,8 +174,9 @@ def get_order_stats() -> Dict[str, Any]:
                 COALESCE(SUM(total_amount), 0.0) as total_spent,
                 COALESCE(SUM(discount), 0.0) as total_saved,
                 COALESCE(SUM(items_count), 0) as total_items
-            FROM orders
-            """
+            FROM orders WHERE user_id = ?
+            """,
+            (user_id,)
         )
         row = cursor.fetchone()
         return dict(row) if row else {
@@ -165,11 +187,10 @@ def get_order_stats() -> Dict[str, Any]:
         }
 
 
-def clear_orders() -> None:
-    """Empties all orders and items."""
+def clear_orders(*, user_id: int) -> None:
+    """Delete orders and line items belonging to the account."""
     init_db()
     with get_connection() as conn:
-        conn.execute("DELETE FROM order_items;")
-        conn.execute("DELETE FROM orders;")
+        conn.execute("DELETE FROM orders WHERE user_id = ?", (user_id,))
         conn.commit()
 

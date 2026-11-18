@@ -9,9 +9,12 @@ import time
 from typing import Any, Dict, List, Optional
 import requests
 from ml.recommender import GroceryRecommender
-from backend.db import order_db
 
 DEFAULT_API_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
+
+
+class AccountRequestError(Exception):
+    """An account or order request could not be completed."""
 
 
 class GroceryEngineClient:
@@ -165,66 +168,18 @@ class GroceryEngineClient:
             "totalAssociationRules": len(self.local_recommender.rules),
         }
 
-    def create_order(
-        self,
-        items: List[Dict[str, Any]],
-        subtotal: float,
-        discount: float = 0.0,
-        delivery_fee: float = 0.0,
-    ) -> Dict[str, Any]:
-        """Saves a placed order to SQLite via REST API or local DB fallback."""
-        payload = {
-            "items": items,
-            "subtotal": subtotal,
-            "discount": discount,
-            "delivery_fee": delivery_fee,
-            "status": "Completed",
-        }
-        if self.check_backend_connection():
-            try:
-                res = requests.post(f"{self.base_url}/orders", json=payload, timeout=2.5)
-                if res.status_code in (200, 201):
-                    return res.json()
-            except Exception:
-                pass
-        # Local SQLite fallback
-        return order_db.create_order(
-            items=items,
-            subtotal=subtotal,
-            discount=discount,
-            delivery_fee=delivery_fee,
-        )
-
-    def get_orders(self, limit: int = 50) -> Dict[str, Any]:
-        """Fetches order history and lifetime KPIs."""
-        if self.check_backend_connection():
-            try:
-                res = requests.get(f"{self.base_url}/orders?limit={limit}", timeout=2.5)
-                if res.status_code == 200:
-                    return res.json()
-            except Exception:
-                pass
-        # Local SQLite fallback
-        orders = order_db.get_orders(limit=limit)
-        stats = order_db.get_order_stats()
-        return {
-            "total_orders": stats.get("total_orders", len(orders)),
-            "total_spent": stats.get("total_spent", 0.0),
-            "total_saved": stats.get("total_saved", 0.0),
-            "orders": orders,
-        }
-
-    def clear_orders(self) -> bool:
-        """Clears order history."""
-        if self.check_backend_connection():
-            try:
-                res = requests.delete(f"{self.base_url}/orders", timeout=2.5)
-                if res.status_code == 200:
-                    return True
-            except Exception:
-                pass
-        order_db.clear_orders()
-        return True
+    def account_request(self, method: str, path: str, *, token: str | None = None, **kwargs) -> Dict[str, Any]:
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        try:
+            response = requests.request(method, f"{self.base_url}{path}", headers=headers, timeout=5, **kwargs)
+            if response.status_code == 204:
+                return {}
+            body = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise AccountRequestError("The account service is unavailable. Try again when the backend is running.") from exc
+        if not 200 <= response.status_code < 300:
+            raise AccountRequestError(body.get("error", {}).get("message", "The request could not be completed."))
+        return body
 
 
 # Global engine client instance

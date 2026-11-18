@@ -6,10 +6,12 @@ Serves real-time association rule lookups, catalog metadata, and curated promoti
 import time
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 
 from backend.config import settings
 from backend.schemas import (
@@ -26,7 +28,7 @@ from backend.schemas import (
     StatsResponse,
 )
 from backend.services.recommender_service import recommender_service
-from backend.db import order_db
+from backend.db import accounts, order_db
 
 START_TIME = time.time()
 MODEL_ERROR = {503: {"model": ErrorResponse, "description": "Association rules are unavailable"}}
@@ -63,6 +65,8 @@ app.add_middleware(
 async def http_exception_handler(request: Request, exc: HTTPException):
     code_map = {
         400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        409: "CONFLICT",
         404: "NOT_FOUND",
         422: "VALIDATION_ERROR",
         500: "INTERNAL_SERVER_ERROR",
@@ -75,6 +79,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         detail = detail.get("message", detail)
     return JSONResponse(
         status_code=exc.status_code,
+        headers=exc.headers,
         content=ErrorResponse(
             error=ErrorDetail(
                 code=code,
@@ -190,10 +195,53 @@ def get_stats() -> StatsResponse:
     return recommender_service.get_stats()
 
 
+class AccountCredentials(BaseModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_.-]+$")
+    password: str = Field(min_length=8, max_length=128, repr=False)
+
+
+class AccountSession(BaseModel):
+    username: str
+    token: str
+
+
+bearer = HTTPBearer(auto_error=False)
+
+
+def require_account(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer)) -> int:
+    user_id = accounts.session_user(credentials.credentials) if credentials else None
+    if user_id is None:
+        raise HTTPException(401, "Sign in to access your orders.", headers={"WWW-Authenticate": "Bearer"})
+    return user_id
+
+
+@app.post(f"{settings.API_V1_STR}/auth/register", response_model=AccountSession, status_code=201, tags=["Accounts"])
+def register_account(payload: AccountCredentials) -> AccountSession:
+    username = payload.username.lower()
+    if not accounts.register(username, payload.password):
+        raise HTTPException(409, "That username is already taken.")
+    return AccountSession(username=username, token=accounts.sign_in(username, payload.password))
+
+
+@app.post(f"{settings.API_V1_STR}/auth/login", response_model=AccountSession, tags=["Accounts"])
+def sign_in_account(payload: AccountCredentials) -> AccountSession:
+    username = payload.username.lower()
+    token = accounts.sign_in(username, payload.password)
+    if token is None:
+        raise HTTPException(401, "Incorrect username or password.")
+    return AccountSession(username=username, token=token)
+
+
+@app.post(f"{settings.API_V1_STR}/auth/logout", status_code=204, tags=["Accounts"])
+def sign_out_account(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer)):
+    if credentials:
+        accounts.sign_out(credentials.credentials)
+
+
 # --- Order History Endpoints (SQLite-backed) ---
 @app.post("/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED, tags=["Orders"])
 @app.post(f"{settings.API_V1_STR}/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED, tags=["Orders"])
-def create_customer_order(payload: OrderCreateRequest) -> OrderResponse:
+def create_customer_order(payload: OrderCreateRequest, user_id: int = Depends(require_account)) -> OrderResponse:
     """Persists a placed order and line items into SQLite database."""
     items_data = [item.model_dump() for item in payload.items]
     order = order_db.create_order(
@@ -202,6 +250,7 @@ def create_customer_order(payload: OrderCreateRequest) -> OrderResponse:
         discount=payload.discount,
         delivery_fee=payload.delivery_fee,
         status=payload.status or "Completed",
+        user_id=user_id,
     )
     if not order:
         raise HTTPException(status_code=500, detail="Failed to persist order to database.")
@@ -210,10 +259,10 @@ def create_customer_order(payload: OrderCreateRequest) -> OrderResponse:
 
 @app.get("/orders", response_model=OrderHistoryResponse, tags=["Orders"])
 @app.get(f"{settings.API_V1_STR}/orders", response_model=OrderHistoryResponse, tags=["Orders"])
-def get_order_history(limit: int = Query(default=50, ge=1, le=100)) -> OrderHistoryResponse:
+def get_order_history(limit: int = Query(default=50, ge=1, le=100), user_id: int = Depends(require_account)) -> OrderHistoryResponse:
     """Retrieves all past orders and lifetime summary metrics from SQLite."""
-    orders = order_db.get_orders(limit=limit)
-    stats = order_db.get_order_stats()
+    orders = order_db.get_orders(limit=limit, user_id=user_id)
+    stats = order_db.get_order_stats(user_id=user_id)
     return OrderHistoryResponse(
         total_orders=stats.get("total_orders", len(orders)),
         total_spent=stats.get("total_spent", 0.0),
@@ -224,9 +273,9 @@ def get_order_history(limit: int = Query(default=50, ge=1, le=100)) -> OrderHist
 
 @app.get("/orders/{order_id}", response_model=OrderResponse, tags=["Orders"])
 @app.get(f"{settings.API_V1_STR}/orders/{{order_id}}", response_model=OrderResponse, tags=["Orders"])
-def get_order_by_id(order_id: str) -> OrderResponse:
+def get_order_by_id(order_id: str, user_id: int = Depends(require_account)) -> OrderResponse:
     """Retrieves single order details by its order ID."""
-    order = order_db.get_order_by_id(order_id)
+    order = order_db.get_order_by_id(order_id, user_id=user_id)
     if not order:
         raise HTTPException(status_code=404, detail=f"Order {order_id} not found.")
     return OrderResponse(**order)
@@ -234,8 +283,8 @@ def get_order_by_id(order_id: str) -> OrderResponse:
 
 @app.delete("/orders", tags=["Orders"])
 @app.delete(f"{settings.API_V1_STR}/orders", tags=["Orders"])
-def clear_all_orders():
+def clear_all_orders(user_id: int = Depends(require_account)):
     """Clears all orders from the SQLite database."""
-    order_db.clear_orders()
+    order_db.clear_orders(user_id=user_id)
     return {"status": "success", "message": "Order history cleared."}
 

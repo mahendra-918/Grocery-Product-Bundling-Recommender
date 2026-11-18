@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from frontend.components.api_client import engine_client
+from frontend.components.api_client import AccountRequestError, engine_client
 from frontend.components.styles import CUSTOM_CSS
 from frontend.components.product_icons import get_product_meta, CATEGORY_ICONS
 
@@ -141,6 +141,40 @@ with st.sidebar:
     )
     st.divider()
 
+    account = st.session_state.get("account")
+    if account:
+        st.caption(f"Signed in as **{account['username']}**")
+        if st.button("Sign out", use_container_width=True):
+            try:
+                engine_client.account_request("POST", "/auth/logout", token=account["token"])
+            except AccountRequestError as exc:
+                st.error(str(exc))
+            else:
+                del st.session_state.account
+                st.session_state.pop("last_order_id", None)
+                replace_cart({})
+                st.rerun()
+    else:
+        with st.expander("Sign in or create an account"):
+            mode = st.radio("Account action", ["Sign in", "Create account"], horizontal=True)
+            with st.form("account_form", clear_on_submit=True):
+                username = st.text_input("Username", max_chars=32)
+                password = st.text_input("Password", type="password", max_chars=128)
+                st.caption("Use at least 8 characters for your password.")
+                submitted = st.form_submit_button(mode, use_container_width=True)
+            if submitted:
+                route = "/auth/login" if mode == "Sign in" else "/auth/register"
+                try:
+                    st.session_state.account = engine_client.account_request(
+                        "POST", route, json={"username": username.strip(), "password": password},
+                    )
+                except AccountRequestError as exc:
+                    st.error(str(exc))
+                else:
+                    st.rerun()
+
+    st.divider()
+
     cart_items = set(st.session_state.cart)
     st.session_state.cart_kits = {
         kit_id: kit for kit_id, kit in st.session_state.cart_kits.items()
@@ -212,27 +246,36 @@ with st.sidebar:
         st.write("")
         col_co, col_cl = st.columns([3, 2])
         with col_co:
-            if st.button("✨ Checkout", use_container_width=True, type="primary"):
+            if st.button("✨ Checkout", use_container_width=True, type="primary", disabled=not account):
                 items_payload = [
                     {"product_name": item, "unit_price": get_price(item), "quantity": quantity}
                     for item, quantity in st.session_state.cart.items()
                 ]
-                new_order = engine_client.create_order(
-                    items=items_payload,
-                    subtotal=subtotal,
-                    discount=discount,
-                    delivery_fee=delivery,
-                )
-                order_id = new_order.get("order_id", "ORD-NEW")
-                replace_cart({})
-                st.session_state.last_order_id = order_id
-                st.balloons()
-                st.toast(f"Order #{order_id} placed successfully!", icon="🎉")
-                st.rerun()
+                try:
+                    new_order = engine_client.account_request(
+                        "POST", "/orders", token=account["token"],
+                        json={
+                            "items": items_payload,
+                            "subtotal": subtotal,
+                            "discount": discount,
+                            "delivery_fee": delivery,
+                        },
+                    )
+                except AccountRequestError as exc:
+                    st.error(str(exc))
+                else:
+                    order_id = new_order["order_id"]
+                    replace_cart({})
+                    st.session_state.last_order_id = order_id
+                    st.balloons()
+                    st.toast(f"Order #{order_id} placed successfully!", icon="🎉")
+                    st.rerun()
         with col_cl:
             if st.button("🗑️ Clear", use_container_width=True):
                 replace_cart({})
                 st.rerun()
+        if not account:
+            st.caption("Sign in to check out.")
     else:
         st.markdown(
             '<div style="text-align:center;padding:1.5rem 0;">'
@@ -601,104 +644,114 @@ with tab_history:
     )
     st.caption("Review your past grocery deliveries and receipts. Click 'Reorder' to instantly reload items into your cart.")
 
-    history_data = engine_client.get_orders(limit=50)
-    orders_list = history_data.get("orders", [])
-    tot_orders = history_data.get("total_orders", len(orders_list))
-    tot_spent = history_data.get("total_spent", 0.0)
-    tot_saved = history_data.get("total_saved", 0.0)
-
-    # Lifetime KPIs
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Lifetime Orders", f"{tot_orders}")
-    kpi2.metric("Total Spent", f"${tot_spent:.2f}")
-    kpi3.metric("Total Saved", f"${tot_saved:.2f}")
-
-    st.write("")
-
-    if not orders_list:
-        st.markdown(
-            '<div class="empty-state">'
-            '  <div class="empty-state-emoji">🧾</div>'
-            '  <div class="empty-state-title">No orders yet!</div>'
-            '  <div class="empty-state-sub">Add groceries to your cart and click ✨ Checkout in the sidebar to record your first order.</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+    if not account:
+        st.info("Sign in from the sidebar to view your receipts and reorder.")
     else:
-        for ord_idx, order in enumerate(orders_list):
-            oid = order.get("order_id", f"ORD-{ord_idx}")
-            created = order.get("created_at", "")
-            items = order.get("items", [])
-            subtot = order.get("subtotal", 0.0)
-            disc = order.get("discount", 0.0)
-            deliv = order.get("delivery_fee", 0.0)
-            tot = order.get("total_amount", 0.0)
-            status_str = order.get("status", "Completed")
+        try:
+            history_data = engine_client.account_request("GET", "/orders", token=account["token"])
+        except AccountRequestError as exc:
+            st.error(str(exc))
+        else:
+            orders_list = history_data.get("orders", [])
+            tot_orders = history_data.get("total_orders", len(orders_list))
+            tot_spent = history_data.get("total_spent", 0.0)
+            tot_saved = history_data.get("total_saved", 0.0)
 
-            with st.container(border=True):
-                # Header row
-                h1, h2 = st.columns([3, 1])
-                with h1:
-                    st.markdown(
-                        f'<div style="font-size:1.1rem;font-weight:800;color:#3fb950;">'
-                        f'📦 {oid} '
-                        f'<span style="font-size:0.75rem;color:#8b949e;font-weight:500;">· {created}</span>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-                with h2:
-                    st.markdown(
-                        f'<div style="text-align:right;">'
-                        f'<span style="background:#1f2d1f;border:1px solid #2ea043;color:#3fb950;'
-                        f'font-size:0.75rem;font-weight:700;padding:0.25rem 0.65rem;border-radius:9999px;">'
-                        f'✓ {status_str}</span>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+            # Lifetime KPIs
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("Lifetime Orders", f"{tot_orders}")
+            kpi2.metric("Total Spent", f"${tot_spent:.2f}")
+            kpi3.metric("Total Saved", f"${tot_saved:.2f}")
 
-                # Items purchased chips
-                item_names = [it.get("product_name", "") for it in items]
-                chips_html = " ".join(
-                    f'<span class="kit-pill">{get_product_meta(p)[1]} {p.title()} × {item["quantity"]} '
-                    f'(${item["unit_price"]:.2f} each)</span>'
-                    for p, item in zip(item_names, items)
+            st.write("")
+
+            if not orders_list:
+                st.markdown(
+                    '<div class="empty-state">'
+                    '  <div class="empty-state-emoji">🧾</div>'
+                    '  <div class="empty-state-title">No orders yet!</div>'
+                    '  <div class="empty-state-sub">Add groceries to your cart and click ✨ Checkout in the sidebar to record your first order.</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
                 )
-                st.markdown(f'<div style="margin:0.5rem 0 0.8rem;">{chips_html}</div>', unsafe_allow_html=True)
+            else:
+                for ord_idx, order in enumerate(orders_list):
+                    oid = order.get("order_id", f"ORD-{ord_idx}")
+                    created = order.get("created_at", "")
+                    items = order.get("items", [])
+                    subtot = order.get("subtotal", 0.0)
+                    disc = order.get("discount", 0.0)
+                    deliv = order.get("delivery_fee", 0.0)
+                    tot = order.get("total_amount", 0.0)
+                    status_str = order.get("status", "Completed")
 
-                # Pricing breakdown
-                p1, p2, p3, p4 = st.columns(4)
-                p1.caption("Subtotal")
-                p1.write(f"${subtot:.2f}")
+                    with st.container(border=True):
+                        # Header row
+                        h1, h2 = st.columns([3, 1])
+                        with h1:
+                            st.markdown(
+                                f'<div style="font-size:1.1rem;font-weight:800;color:#3fb950;">'
+                                f'📦 {oid} '
+                                f'<span style="font-size:0.75rem;color:#8b949e;font-weight:500;">· {created}</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+                        with h2:
+                            st.markdown(
+                                f'<div style="text-align:right;">'
+                                f'<span style="background:#1f2d1f;border:1px solid #2ea043;color:#3fb950;'
+                                f'font-size:0.75rem;font-weight:700;padding:0.25rem 0.65rem;border-radius:9999px;">'
+                                f'✓ {escape(status_str)}</span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
 
-                p2.caption("Savings")
-                p2.write(f"-${disc:.2f}" if disc > 0 else "$0.00")
+                        # Items purchased chips
+                        item_names = [it.get("product_name", "") for it in items]
+                        chips_html = " ".join(
+                            f'<span class="kit-pill">{get_product_meta(p)[1]} {escape(p.title())} × {item["quantity"]} '
+                            f'(${item["unit_price"]:.2f} each)</span>'
+                            for p, item in zip(item_names, items)
+                        )
+                        st.markdown(f'<div style="margin:0.5rem 0 0.8rem;">{chips_html}</div>', unsafe_allow_html=True)
 
-                p3.caption("Delivery")
-                p3.write("Free" if deliv == 0 else f"${deliv:.2f}")
+                        # Pricing breakdown
+                        p1, p2, p3, p4 = st.columns(4)
+                        p1.caption("Subtotal")
+                        p1.write(f"${subtot:.2f}")
 
-                p4.caption("Total Paid")
-                p4.write(f"**:green[${tot:.2f}]**")
+                        p2.caption("Savings")
+                        p2.write(f"-${disc:.2f}" if disc > 0 else "$0.00")
+
+                        p3.caption("Delivery")
+                        p3.write("Free" if deliv == 0 else f"${deliv:.2f}")
+
+                        p4.caption("Total Paid")
+                        p4.write(f"**:green[${tot:.2f}]**")
+
+                        st.write("")
+                        col_btn, _ = st.columns([2, 3])
+                        ordered_quantity = sum(item["quantity"] for item in items)
+                        with col_btn:
+                            if st.button(f"🔁 Reorder Items ({ordered_quantity})", key=f"reorder_btn_{oid}", use_container_width=True):
+                                quantities = Counter()
+                                for item in items:
+                                    quantities[item["product_name"].strip().lower()] += item["quantity"]
+                                replace_cart(dict(quantities))
+                                st.toast(f"Loaded {ordered_quantity} items from {oid} into cart!", icon="🛒")
+                                st.rerun()
 
                 st.write("")
-                col_btn, _ = st.columns([2, 3])
-                ordered_quantity = sum(item["quantity"] for item in items)
-                with col_btn:
-                    if st.button(f"🔁 Reorder Items ({ordered_quantity})", key=f"reorder_btn_{oid}", use_container_width=True):
-                        quantities = Counter()
-                        for item in items:
-                            quantities[item["product_name"].strip().lower()] += item["quantity"]
-                        replace_cart(dict(quantities))
-                        st.toast(f"Loaded {ordered_quantity} items from {oid} into cart!", icon="🛒")
-                        st.rerun()
-
-        st.write("")
-        with st.expander("⚙️ Manage Order History"):
-            st.warning("This will clear your saved past order history.")
-            if st.button("🗑️ Clear All Past Orders", type="secondary"):
-                engine_client.clear_orders()
-                st.toast("Order history cleared.", icon="🗑️")
-                st.rerun()
-
+                with st.expander("⚙️ Manage Order History"):
+                    st.warning("This will clear your saved past order history.")
+                    if st.button("🗑️ Clear All Past Orders", type="secondary"):
+                        try:
+                            engine_client.account_request("DELETE", "/orders", token=account["token"])
+                        except AccountRequestError as exc:
+                            st.error(str(exc))
+                        else:
+                            st.toast("Order history cleared.", icon="🗑️")
+                            st.rerun()
 
 
 if developer_tabs:

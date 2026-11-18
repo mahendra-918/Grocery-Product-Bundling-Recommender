@@ -106,3 +106,10 @@ the model's fallback use purchase frequencies from the training baskets.
 Hit Rate@5 is the share of evaluated baskets where the hidden product appears
 among the suggestions. The report is saved to `models/holdout_evaluation.json`.
 The evaluation trains temporary artifacts, leaving the storefront model intact.
+
+## Shopper Accounts
+
+Start the FastAPI backend and Streamlit, then use **Sign in or create an
+account** in the sidebar. Shoppers can browse as guests. Checkout, receipts,
+and reordering use the signed-in account. Orders saved before accounts were
+introduced have no owner and are kept out of account histories.
